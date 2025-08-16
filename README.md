@@ -1,616 +1,2141 @@
-Azure AML 
+# MLflow Complete Reference Card
 
+## Overview
 
-# Azure ML Time Series Forecasting with Random Forest - Complete Reference
+MLflow is an open-source platform for managing the ML lifecycle, including experimentation, reproducibility, deployment, and a central model registry.
 
-## 1. Environment Setup & Authentication
+## Core Components
 
-### Install Required Packages
+### 1. MLflow Tracking
+
+Track experiments, parameters, metrics, and artifacts.
+
+#### Basic Tracking Setup
+
+```python
+import mlflow
+import mlflow.sklearn
+from mlflow import log_metric, log_param, log_artifacts
+
+# Set tracking URI (optional)
+mlflow.set_tracking_uri("http://localhost:5000")
+
+# Set experiment
+mlflow.set_experiment("my_experiment")
+```
+
+#### Run Context Management
+
+```python
+# Method 1: Context manager (recommended)
+with mlflow.start_run():
+    mlflow.log_param("alpha", 0.1)
+    mlflow.log_metric("rmse", 0.786)
+    
+# Method 2: Manual start/end
+run = mlflow.start_run()
+mlflow.log_param("alpha", 0.1)
+mlflow.end_run()
+
+# Method 3: Active run
+mlflow.start_run()
+# ... logging code ...
+mlflow.end_run()
+```
+
+#### Logging Functions
+
+```python
+# Parameters (hyperparameters, configs)
+mlflow.log_param("learning_rate", 0.01)
+mlflow.log_params({"batch_size": 32, "epochs": 100})
+
+# Metrics (model performance)
+mlflow.log_metric("accuracy", 0.95)
+mlflow.log_metrics({"precision": 0.92, "recall": 0.88})
+
+# Step-wise metrics (for tracking over epochs)
+for epoch in range(100):
+    mlflow.log_metric("loss", loss_value, step=epoch)
+
+# Artifacts (files, models, plots)
+mlflow.log_artifact("model.pkl")
+mlflow.log_artifacts("output_dir")
+
+# Text
+mlflow.log_text("Some important note", "notes.txt")
+
+# Dictionary as JSON
+mlflow.log_dict({"key": "value"}, "config.json")
+```
+
+#### Tags and Notes
+
+```python
+# Set tags
+mlflow.set_tag("model_type", "random_forest")
+mlflow.set_tags({"version": "1.0", "team": "data_science"})
+
+# Add notes
+mlflow.set_tag("mlflow.note.content", "This is a baseline model")
+```
+
+### 2. MLflow Models
+
+Standardized model packaging and deployment.
+
+#### Model Flavors
+
+```python
+# Scikit-learn
+import mlflow.sklearn
+mlflow.sklearn.log_model(model, "model")
+loaded_model = mlflow.sklearn.load_model("runs:/{}/model".format(run_id))
+
+# PyTorch
+import mlflow.pytorch
+mlflow.pytorch.log_model(model, "model")
+
+# TensorFlow/Keras
+import mlflow.tensorflow
+import mlflow.keras
+mlflow.keras.log_model(model, "model")
+
+# XGBoost
+import mlflow.xgboost
+mlflow.xgboost.log_model(model, "model")
+
+# LightGBM
+import mlflow.lightgbm
+mlflow.lightgbm.log_model(model, "model")
+
+# Statsmodels
+import mlflow.statsmodels
+mlflow.statsmodels.log_model(model, "model")
+
+# Spark ML
+import mlflow.spark
+mlflow.spark.log_model(model, "model")
+
+# Custom Python function
+import mlflow.pyfunc
+mlflow.pyfunc.log_model("model", python_model=custom_model)
+```
+
+#### Custom Model Example
+
+```python
+import mlflow.pyfunc
+
+class ModelWrapper(mlflow.pyfunc.PythonModel):
+    def __init__(self, model):
+        self.model = model
+        
+    def predict(self, context, model_input):
+        return self.model.predict(model_input)
+
+# Log custom model
+with mlflow.start_run():
+    wrapped_model = ModelWrapper(trained_model)
+    mlflow.pyfunc.log_model(
+        "custom_model", 
+        python_model=wrapped_model,
+        registered_model_name="MyCustomModel"
+    )
+```
+
+#### Model Signature
+
+```python
+from mlflow.models.signature import infer_signature
+from mlflow.types.schema import Schema, ColSpec
+
+# Infer signature automatically
+signature = infer_signature(X_train, y_pred)
+
+# Manual signature definition
+input_schema = Schema([
+    ColSpec("double", "feature1"),
+    ColSpec("double", "feature2"),
+    ColSpec("string", "category")
+])
+output_schema = Schema([ColSpec("double")])
+signature = ModelSignature(inputs=input_schema, outputs=output_schema)
+
+# Log with signature
+mlflow.sklearn.log_model(model, "model", signature=signature)
+```
+
+### 3. MLflow Projects
+
+Reproducible ML code packaging.
+
+#### MLproject File
+
+```yaml
+name: My Project
+conda_env: conda.yaml
+
+entry_points:
+  main:
+    parameters:
+      alpha: {type: float, default: 0.1}
+      l1_ratio: {type: float, default: 0.1}
+    command: "python train.py {alpha} {l1_ratio}"
+    
+  validate:
+    parameters:
+      model_uri: string
+    command: "python validate.py {model_uri}"
+```
+
+#### Running Projects
+
+```python
+# Run local project
+mlflow.run(".", parameters={"alpha": 0.5})
+
+# Run from GitHub
+mlflow.run(
+    "https://github.com/user/repo.git",
+    parameters={"alpha": 0.5}
+)
+
+# Run specific entry point
+mlflow.run(".", entry_point="validate", parameters={"model_uri": "runs:/abc/model"})
+```
+
+### 4. MLflow Model Registry
+
+Central model store for lifecycle management.
+
+#### Registering Models
+
+```python
+# Register during logging
+mlflow.sklearn.log_model(
+    model, 
+    "model",
+    registered_model_name="ProductionModel"
+)
+
+# Register existing run
+model_uri = "runs:/{}/model".format(run_id)
+mlflow.register_model(model_uri, "ProductionModel")
+
+# Register with version description
+result = mlflow.register_model(
+    model_uri,
+    "ProductionModel",
+    description="Model trained on latest dataset"
+)
+```
+
+#### Model Versions and Stages
+
+```python
+from mlflow.tracking import MlflowClient
+
+client = MlflowClient()
+
+# List registered models
+models = client.list_registered_models()
+
+# Get model versions
+versions = client.get_registered_model("ProductionModel").latest_versions
+
+# Transition model stage
+client.transition_model_version_stage(
+    name="ProductionModel",
+    version=1,
+    stage="Production",
+    archive_existing_versions=True
+)
+
+# Update model version
+client.update_model_version(
+    name="ProductionModel",
+    version=1,
+    description="Updated description"
+)
+
+# Delete model version
+client.delete_model_version("ProductionModel", version=1)
+```
+
+#### Loading Models from Registry
+
+```python
+# Load latest version
+model = mlflow.pyfunc.load_model("models:/ProductionModel/latest")
+
+# Load specific version
+model = mlflow.pyfunc.load_model("models:/ProductionModel/1")
+
+# Load by stage
+model = mlflow.pyfunc.load_model("models:/ProductionModel/Production")
+```
+
+## Advanced Features
+
+### Autologging
+
+```python
+# Enable autologging for specific libraries
+mlflow.sklearn.autolog()
+mlflow.keras.autolog()
+mlflow.pytorch.autolog()
+mlflow.xgboost.autolog()
+
+# Enable for all supported libraries
+mlflow.autolog()
+
+# Disable autologging
+mlflow.sklearn.autolog(disable=True)
+
+# Configure autologging
+mlflow.sklearn.autolog(
+    log_input_examples=True,
+    log_model_signatures=True,
+    log_models=False  # Don't log models automatically
+)
+```
+
+### Parent and Child Runs
+
+```python
+# Parent run
+with mlflow.start_run() as parent_run:
+    mlflow.log_param("experiment_type", "hyperparameter_tuning")
+    
+    # Child runs for different configurations
+    for alpha in [0.1, 0.5, 1.0]:
+        with mlflow.start_run(nested=True) as child_run:
+            mlflow.log_param("alpha", alpha)
+            # Train and log model...
+```
+
+### Search and Query Runs
+
+```python
+from mlflow.tracking import MlflowClient
+
+client = MlflowClient()
+
+# Search runs
+runs = mlflow.search_runs(
+    experiment_ids=["1"],
+    filter_string="metrics.accuracy > 0.9",
+    order_by=["metrics.accuracy DESC"],
+    max_results=10
+)
+
+# Get run data
+run = client.get_run(run_id)
+print(f"Status: {run.info.status}")
+print(f"Start time: {run.info.start_time}")
+print(f"Parameters: {run.data.params}")
+print(f"Metrics: {run.data.metrics}")
+
+# Get metric history
+history = client.get_metric_history(run_id, "loss")
+```
+
+### Experiment Management
+
+```python
+# Create experiment
+experiment_id = mlflow.create_experiment(
+    "New Experiment",
+    artifact_location="s3://bucket/artifacts",
+    tags={"team": "ml", "project": "recommendation"}
+)
+
+# Get experiment
+experiment = mlflow.get_experiment(experiment_id)
+
+# List experiments
+experiments = mlflow.list_experiments()
+
+# Set experiment by name
+mlflow.set_experiment("My Experiment")
+
+# Delete experiment
+mlflow.delete_experiment(experiment_id)
+```
+
+## Deployment Options
+
+### Local Model Serving
 
 ```bash
-pip install azureml-sdk pandas numpy scikit-learn matplotlib seaborn
-pip install azureml-train-automl-client azureml-widgets
+# Serve model locally
+mlflow models serve -m models:/ProductionModel/1 -p 5001
+
+# Serve with conda environment
+mlflow models serve -m models:/ProductionModel/1 --env-manager conda
+
+# Build Docker image
+mlflow models build-docker -m models:/ProductionModel/1 -n my-model
+
+# Generate Dockerfile
+mlflow models generate-dockerfile -m models:/ProductionModel/1 -d ./dockerfile_dir
 ```
 
-### Authentication & Workspace Connection
+### Cloud Deployments
 
 ```python
-from azureml.core import Workspace, Environment, Experiment, Dataset
-from azureml.core.authentication import InteractiveLoginAuthentication
-from azureml.core.compute import ComputeTarget, AmlCompute
-from azureml.train.sklearn import SKLearn
-from azureml.core.runconfig import RunConfiguration
+# Deploy to AWS SageMaker
+mlflow.deployments.deploy(
+    "sagemaker",
+    model_uri="models:/ProductionModel/1",
+    config={
+        "instance_type": "ml.m5.large",
+        "instance_count": 1,
+        "region_name": "us-west-2"
+    }
+)
 
-# Authentication
-auth = InteractiveLoginAuthentication(tenant_id="your-tenant-id")
-
-# Connect to workspace
-ws = Workspace.from_config(auth=auth)
-# OR create new workspace
-ws = Workspace.create(
-    name="ml-workspace",
-    subscription_id="your-subscription-id",
-    resource_group="your-resource-group",
-    location="eastus"
+# Deploy to Azure ML
+mlflow.deployments.deploy(
+    "azureml",
+    model_uri="models:/ProductionModel/1",
+    config={
+        "compute_type": "ACI",
+        "location": "eastus2"
+    }
 )
 ```
 
-## 2. Data Preparation & Feature Engineering
-
-### Load and Prepare Time Series Data
+### Batch Inference
 
 ```python
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
-
-# Load data
-df = pd.read_csv('timeseries_data.csv')
-df['date'] = pd.to_datetime(df['date'])
-df = df.set_index('date').sort_index()
-
-# Basic time series features
-def create_time_features(df, target_col):
-    """Create comprehensive time-based features"""
-    df_features = df.copy()
-    
-    # Temporal features
-    df_features['year'] = df_features.index.year
-    df_features['month'] = df_features.index.month
-    df_features['day'] = df_features.index.day
-    df_features['dayofweek'] = df_features.index.dayofweek
-    df_features['quarter'] = df_features.index.quarter
-    df_features['is_weekend'] = df_features.index.dayofweek.isin([5, 6]).astype(int)
-    
-    # Cyclical encoding
-    df_features['month_sin'] = np.sin(2 * np.pi * df_features['month'] / 12)
-    df_features['month_cos'] = np.cos(2 * np.pi * df_features['month'] / 12)
-    df_features['day_sin'] = np.sin(2 * np.pi * df_features['day'] / 31)
-    df_features['day_cos'] = np.cos(2 * np.pi * df_features['day'] / 31)
-    
-    return df_features
-
-# Lag features for time series
-def create_lag_features(df, target_col, lags=[1, 2, 3, 7, 14, 30]):
-    """Create lagged features"""
-    for lag in lags:
-        df[f'{target_col}_lag_{lag}'] = df[target_col].shift(lag)
-    
-    # Rolling statistics
-    windows = [3, 7, 14, 30]
-    for window in windows:
-        df[f'{target_col}_rolling_mean_{window}'] = df[target_col].rolling(window).mean()
-        df[f'{target_col}_rolling_std_{window}'] = df[target_col].rolling(window).std()
-        df[f'{target_col}_rolling_min_{window}'] = df[target_col].rolling(window).min()
-        df[f'{target_col}_rolling_max_{window}'] = df[target_col].rolling(window).max()
-    
-    return df
-
-# Apply feature engineering
-df_processed = create_time_features(df, 'target_value')
-df_processed = create_lag_features(df_processed, 'target_value')
-df_processed = df_processed.dropna()
-```
-
-### Upload Data to Azure ML
-
-```python
-from azureml.core import Datastore, Dataset
-
-# Get default datastore
-datastore = ws.get_default_datastore()
-
-# Upload data
-datastore.upload_files(
-    files=['./processed_data.csv'],
-    target_path='timeseries-data/',
-    overwrite=True
+# Apply model to Spark DataFrame
+predictions = mlflow.pyfunc.spark_udf(
+    spark, 
+    model_uri="models:/ProductionModel/1"
 )
 
-# Create dataset
-dataset = Dataset.Tabular.from_delimited_files(
-    path=(datastore, 'timeseries-data/processed_data.csv')
-)
-dataset = dataset.register(
-    workspace=ws,
-    name='timeseries-dataset',
-    description='Time series data with engineered features'
-)
+df_with_predictions = df.withColumn("predictions", predictions(*feature_cols))
 ```
 
-## 3. Model Development
+## Configuration and Setup
 
-### Random Forest Time Series Model
+### Tracking Server Setup
 
-```python
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.model_selection import TimeSeriesSplit, GridSearchCV
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-import joblib
+```bash
+# Start local tracking server
+mlflow server \
+    --backend-store-uri sqlite:///mlflow.db \
+    --default-artifact-root ./mlruns \
+    --host 0.0.0.0 \
+    --port 5000
 
-class TimeSeriesRandomForest:
-    def __init__(self, **rf_params):
-        self.model = RandomForestRegressor(**rf_params)
-        self.feature_importance_ = None
-        
-    def prepare_data(self, df, target_col, test_size=0.2):
-        """Prepare data for time series modeling"""
-        # Sort by date
-        df_sorted = df.sort_index()
-        
-        # Split features and target
-        feature_cols = [col for col in df_sorted.columns if col != target_col]
-        X = df_sorted[feature_cols]
-        y = df_sorted[target_col]
-        
-        # Time-based split
-        split_idx = int(len(df_sorted) * (1 - test_size))
-        X_train, X_test = X[:split_idx], X[split_idx:]
-        y_train, y_test = y[:split_idx], y[split_idx:]
-        
-        return X_train, X_test, y_train, y_test
-    
-    def train(self, X_train, y_train, cv_folds=5):
-        """Train with time series cross-validation"""
-        # Time series cross-validation
-        tscv = TimeSeriesSplit(n_splits=cv_folds)
-        
-        # Hyperparameter tuning
-        param_grid = {
-            'n_estimators': [100, 200, 300],
-            'max_depth': [10, 20, None],
-            'min_samples_split': [2, 5, 10],
-            'min_samples_leaf': [1, 2, 4]
-        }
-        
-        grid_search = GridSearchCV(
-            self.model, param_grid, cv=tscv, 
-            scoring='neg_mean_absolute_error', n_jobs=-1
-        )
-        
-        grid_search.fit(X_train, y_train)
-        self.model = grid_search.best_estimator_
-        self.feature_importance_ = self.model.feature_importances_
-        
-        return grid_search.best_params_
-    
-    def predict(self, X):
-        """Make predictions"""
-        return self.model.predict(X)
-    
-    def evaluate(self, X_test, y_test):
-        """Evaluate model performance"""
-        y_pred = self.predict(X_test)
-        
-        metrics = {
-            'mae': mean_absolute_error(y_test, y_pred),
-            'rmse': np.sqrt(mean_squared_error(y_test, y_pred)),
-            'r2': r2_score(y_test, y_pred),
-            'mape': np.mean(np.abs((y_test - y_pred) / y_test)) * 100
-        }
-        
-        return metrics, y_pred
-
-# Usage example
-ts_model = TimeSeriesRandomForest(random_state=42)
-X_train, X_test, y_train, y_test = ts_model.prepare_data(df_processed, 'target_value')
-best_params = ts_model.train(X_train, y_train)
-metrics, predictions = ts_model.evaluate(X_test, y_test)
+# With remote artifact store
+mlflow server \
+    --backend-store-uri postgresql://user:pass@host:port/db \
+    --default-artifact-root s3://bucket/artifacts \
+    --host 0.0.0.0
 ```
 
-## 4. Azure ML Experiment & Training
+### Environment Variables
 
-### Create Compute Cluster
-
-```python
-from azureml.core.compute import AmlCompute
-from azureml.core.compute_target import ComputeTargetException
-
-cluster_name = "cpu-cluster"
-try:
-    compute_target = ComputeTarget(workspace=ws, name=cluster_name)
-except ComputeTargetException:
-    compute_config = AmlCompute.provisioning_configuration(
-        vm_size="STANDARD_DS3_V2",
-        min_nodes=0,
-        max_nodes=4
-    )
-    compute_target = ComputeTarget.create(ws, cluster_name, compute_config)
-    compute_target.wait_for_completion(show_output=True)
+```bash
+export MLFLOW_TRACKING_URI=http://localhost:5000
+export MLFLOW_S3_ENDPOINT_URL=http://minio:9000
+export AWS_ACCESS_KEY_ID=minioadmin
+export AWS_SECRET_ACCESS_KEY=minioadmin
+export MLFLOW_EXPERIMENT_NAME=default
 ```
 
-### Training Script (train.py)
+### Configuration File
 
 ```python
-# train.py
-import argparse
-import pandas as pd
-import numpy as np
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.model_selection import TimeSeriesSplit
-from sklearn.metrics import mean_absolute_error, mean_squared_error
-import joblib
-from azureml.core import Run
+# mlflow_config.py
+import mlflow
+import os
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--data-path', type=str, help='Path to training data')
-    parser.add_argument('--n-estimators', type=int, default=100)
-    parser.add_argument('--max-depth', type=int, default=10)
-    parser.add_argument('--min-samples-split', type=int, default=2)
+def setup_mlflow():
+    mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000"))
+    mlflow.set_experiment(os.getenv("MLFLOW_EXPERIMENT_NAME", "default"))
     
-    args = parser.parse_args()
-    run = Run.get_context()
-    
-    # Load data
-    df = pd.read_csv(args.data_path)
-    
-    # Prepare features and target
-    feature_cols = [col for col in df.columns if col not in ['target_value', 'date']]
-    X = df[feature_cols]
-    y = df['target_value']
-    
-    # Time-based split
-    split_idx = int(len(df) * 0.8)
-    X_train, X_test = X[:split_idx], X[split_idx:]
-    y_train, y_test = y[:split_idx], y[split_idx:]
-    
-    # Train model
-    model = RandomForestRegressor(
-        n_estimators=args.n_estimators,
-        max_depth=args.max_depth,
-        min_samples_split=args.min_samples_split,
-        random_state=42
-    )
-    
-    model.fit(X_train, y_train)
-    
-    # Evaluate
-    y_pred = model.predict(X_test)
-    mae = mean_absolute_error(y_test, y_pred)
-    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-    
-    # Log metrics
-    run.log('mae', mae)
-    run.log('rmse', rmse)
-    
-    # Save model
-    joblib.dump(model, 'outputs/model.pkl')
-    
-    print(f'MAE: {mae:.4f}, RMSE: {rmse:.4f}')
-
-if __name__ == '__main__':
-    main()
+    # Configure autologging
+    mlflow.autolog()
 ```
 
-### Submit Training Job
+## Best Practices and Patterns
+
+### Experiment Organization
 
 ```python
-from azureml.core import ScriptRunConfig, Environment
-from azureml.core.conda_dependencies import CondaDependencies
+# Use descriptive experiment names
+mlflow.set_experiment(f"recommendation_model_{datetime.now().strftime('%Y%m%d')}")
 
-# Create environment
-env = Environment(name="sklearn-env")
-conda_dep = CondaDependencies()
-conda_dep.add_conda_package("scikit-learn")
-conda_dep.add_conda_package("pandas")
-conda_dep.add_conda_package("numpy")
-env.python.conda_dependencies = conda_dep
+# Use consistent tagging strategy
+tags = {
+    "model_type": "collaborative_filtering",
+    "data_version": "v2.1",
+    "feature_set": "user_item_interactions",
+    "environment": "production"
+}
+mlflow.set_tags(tags)
 
-# Create experiment
-experiment = Experiment(workspace=ws, name='timeseries-forecasting')
-
-# Configure script run
-script_config = ScriptRunConfig(
-    source_directory='./src',
-    script='train.py',
-    arguments=[
-        '--data-path', dataset.as_mount(),
-        '--n-estimators', 200,
-        '--max-depth', 15,
-        '--min-samples-split', 5
-    ],
-    compute_target=compute_target,
-    environment=env
-)
-
-# Submit run
-run = experiment.submit(config=script_config)
-run.wait_for_completion(show_output=True)
+# Log important context
+mlflow.log_param("git_commit", get_git_commit())
+mlflow.log_param("dataset_size", len(train_data))
+mlflow.log_param("feature_count", X_train.shape[1])
 ```
 
-## 5. Model Registration & Deployment
-
-### Register Model
+### Model Validation Pattern
 
 ```python
-from azureml.core.model import Model
-
-# Register model
-model = run.register_model(
-    model_name='timeseries-rf-model',
-    model_path='outputs/model.pkl',
-    description='Random Forest model for time series forecasting'
-)
+def train_and_validate_model(params):
+    with mlflow.start_run():
+        # Log hyperparameters
+        mlflow.log_params(params)
+        
+        # Train model
+        model = train_model(params)
+        
+        # Validate
+        train_score = evaluate_model(model, X_train, y_train)
+        val_score = evaluate_model(model, X_val, y_val)
+        
+        # Log metrics
+        mlflow.log_metrics({
+            "train_accuracy": train_score,
+            "val_accuracy": val_score,
+            "overfitting": train_score - val_score
+        })
+        
+        # Log model if performance is good
+        if val_score > 0.8:
+            mlflow.sklearn.log_model(
+                model, 
+                "model",
+                registered_model_name="BestModel" if val_score > 0.9 else None
+            )
+        
+        return model, val_score
 ```
 
-### Scoring Script (score.py)
+### Pipeline Integration
 
 ```python
-# score.py
-import json
-import joblib
-import pandas as pd
-import numpy as np
-from azureml.core.model import Model
+class MLflowPipeline:
+    def __init__(self, experiment_name):
+        mlflow.set_experiment(experiment_name)
+        
+    def run_experiment(self, config):
+        with mlflow.start_run() as run:
+            # Data preparation
+            X_train, X_val, y_train, y_val = self.prepare_data(config)
+            mlflow.log_params(config["data"])
+            
+            # Feature engineering
+            features = self.engineer_features(X_train, config["features"])
+            mlflow.log_param("feature_count", len(features))
+            
+            # Model training
+            model = self.train_model(X_train, y_train, config["model"])
+            mlflow.log_params(config["model"])
+            
+            # Evaluation
+            metrics = self.evaluate_model(model, X_val, y_val)
+            mlflow.log_metrics(metrics)
+            
+            # Model logging
+            mlflow.sklearn.log_model(model, "model")
+            
+            return run.info.run_id
+```
 
-def init():
-    global model
-    model_path = Model.get_model_path('timeseries-rf-model')
-    model = joblib.load(model_path)
+### Error Handling and Cleanup
 
-def run(raw_data):
+```python
+def safe_mlflow_run(training_function, **kwargs):
+    run_id = None
     try:
-        data = json.loads(raw_data)['data']
-        df = pd.DataFrame(data)
-        
-        # Make predictions
-        predictions = model.predict(df)
-        
-        # Return predictions
-        return predictions.tolist()
+        with mlflow.start_run() as run:
+            run_id = run.info.run_id
+            result = training_function(**kwargs)
+            mlflow.log_metrics({"success": 1})
+            return result
+            
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        if run_id:
+            # Log error information
+            mlflow.log_param("error_message", str(e))
+            mlflow.log_metrics({"success": 0})
+        
+        # End run gracefully
+        if mlflow.active_run():
+            mlflow.end_run(status="FAILED")
+        raise
 ```
 
-### Deploy as Web Service
+## Common Use Cases and Examples
+
+### Hyperparameter Tuning with Optuna
 
 ```python
-from azureml.core.webservice import AciWebservice
-from azureml.core.model import InferenceConfig
+import optuna
+from optuna.integration.mlflow import MLflowCallback
 
-# Inference configuration
-inference_config = InferenceConfig(
-    entry_script="score.py",
-    environment=env
-)
-
-# Deployment configuration
-deployment_config = AciWebservice.deploy_configuration(
-    cpu_cores=1,
-    memory_gb=1,
-    description="Time series forecasting endpoint"
-)
-
-# Deploy
-service = Model.deploy(
-    workspace=ws,
-    name="timeseries-rf-service",
-    models=[model],
-    inference_config=inference_config,
-    deployment_config=deployment_config
-)
-
-service.wait_for_deployment(show_output=True)
-print(f"Scoring URI: {service.scoring_uri}")
-```
-
-## 6. Model Monitoring & Evaluation
-
-### Advanced Evaluation Metrics
-
-```python
-import matplotlib.pyplot as plt
-import seaborn as sns
-from sklearn.metrics import mean_absolute_percentage_error
-
-def comprehensive_evaluation(y_true, y_pred, dates=None):
-    """Comprehensive time series model evaluation"""
-    
-    metrics = {
-        'MAE': mean_absolute_error(y_true, y_pred),
-        'RMSE': np.sqrt(mean_squared_error(y_true, y_pred)),
-        'MAPE': mean_absolute_percentage_error(y_true, y_pred) * 100,
-        'R²': r2_score(y_true, y_pred)
+def objective(trial):
+    # Suggest hyperparameters
+    params = {
+        'n_estimators': trial.suggest_int('n_estimators', 50, 300),
+        'max_depth': trial.suggest_int('max_depth', 3, 10),
+        'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3)
     }
     
-    # Residual analysis
-    residuals = y_true - y_pred
-    
-    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-    
-    # Actual vs Predicted
-    axes[0,0].scatter(y_true, y_pred, alpha=0.6)
-    axes[0,0].plot([y_true.min(), y_true.max()], [y_true.min(), y_true.max()], 'r--', lw=2)
-    axes[0,0].set_xlabel('Actual')
-    axes[0,0].set_ylabel('Predicted')
-    axes[0,0].set_title('Actual vs Predicted')
-    
-    # Residuals plot
-    if dates is not None:
-        axes[0,1].plot(dates, residuals)
-    else:
-        axes[0,1].plot(residuals)
-    axes[0,1].set_title('Residuals over Time')
-    axes[0,1].set_ylabel('Residuals')
-    
-    # Residuals distribution
-    axes[1,0].hist(residuals, bins=30, alpha=0.7)
-    axes[1,0].set_title('Residuals Distribution')
-    axes[1,0].set_xlabel('Residuals')
-    
-    # Q-Q plot
-    from scipy import stats
-    stats.probplot(residuals, dist="norm", plot=axes[1,1])
-    axes[1,1].set_title('Q-Q Plot')
-    
-    plt.tight_layout()
-    plt.show()
-    
-    return metrics
-```
-
-### Feature Importance Analysis
-
-```python
-def analyze_feature_importance(model, feature_names, top_n=15):
-    """Analyze and visualize feature importance"""
-    
-    importance_df = pd.DataFrame({
-        'feature': feature_names,
-        'importance': model.feature_importances_
-    }).sort_values('importance', ascending=False)
-    
-    plt.figure(figsize=(10, 8))
-    sns.barplot(data=importance_df.head(top_n), x='importance', y='feature')
-    plt.title('Top Feature Importances')
-    plt.xlabel('Importance')
-    plt.tight_layout()
-    plt.show()
-    
-    return importance_df
-```
-
-## 7. Production Pipeline
-
-### Azure ML Pipeline
-
-```python
-from azureml.pipeline.core import Pipeline, PipelineData
-from azureml.pipeline.steps import PythonScriptStep
-
-# Pipeline data
-processed_data = PipelineData("processed_data", datastore=datastore)
-model_output = PipelineData("model_output", datastore=datastore)
-
-# Data preprocessing step
-prep_step = PythonScriptStep(
-    script_name="preprocess.py",
-    source_directory="./pipeline_steps",
-    outputs=[processed_data],
-    compute_target=compute_target,
-    runconfig=run_config
-)
-
-# Training step
-train_step = PythonScriptStep(
-    script_name="train.py",
-    source_directory="./pipeline_steps",
-    inputs=[processed_data],
-    outputs=[model_output],
-    compute_target=compute_target,
-    runconfig=run_config
-)
-
-# Create pipeline
-pipeline = Pipeline(workspace=ws, steps=[prep_step, train_step])
-pipeline_run = experiment.submit(pipeline)
-```
-
-### Batch Inference Pipeline
-
-```python
-from azureml.pipeline.steps import ParallelRunStep
-from azureml.pipeline.core import ParallelRunConfig
-
-# Batch scoring configuration
-batch_config = ParallelRunConfig(
-    source_directory='./batch_scoring',
-    entry_script='batch_score.py',
-    mini_batch_size='1000',
-    error_threshold=-1,
-    output_action='append_row',
-    environment=env,
-    compute_target=compute_target,
-    node_count=2
-)
-
-# Batch scoring step
-batch_step = ParallelRunStep(
-    name='batch-forecasting',
-    parallel_run_config=batch_config,
-    inputs=[input_dataset.as_named_input('input_data')],
-    output=output_data,
-    allow_reuse=False
-)
-```
-
-## 8. Key Functions & Utilities
-
-### Time Series Cross-Validation
-
-```python
-from sklearn.model_selection import TimeSeriesSplit
-
-def time_series_cv(model, X, y, n_splits=5):
-    """Perform time series cross-validation"""
-    tscv = TimeSeriesSplit(n_splits=n_splits)
-    cv_scores = []
-    
-    for train_idx, val_idx in tscv.split(X):
-        X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
-        y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
+    with mlflow.start_run(nested=True):
+        mlflow.log_params(params)
         
+        # Train and evaluate
+        model = RandomForestClassifier(**params)
         model.fit(X_train, y_train)
-        y_pred = model.predict(X_val)
-        score = mean_absolute_error(y_val, y_pred)
-        cv_scores.append(score)
+        
+        score = model.score(X_val, y_val)
+        mlflow.log_metric('accuracy', score)
+        
+        return score
+
+# Run optimization
+study = optuna.create_study(direction='maximize')
+mlflc = MLflowCallback(tracking_uri="http://localhost:5000", metric_name="accuracy")
+
+with mlflow.start_run():
+    study.optimize(objective, n_trials=100, callbacks=[mlflc])
     
-    return np.mean(cv_scores), np.std(cv_scores)
+    # Log best parameters
+    mlflow.log_params(study.best_params)
+    mlflow.log_metric('best_accuracy', study.best_value)
 ```
 
-### Data Drift Detection
+### A/B Testing Model Comparison
 
 ```python
-def detect_data_drift(reference_data, current_data, threshold=0.1):
-    """Simple data drift detection"""
-    from scipy.stats import ks_2samp
+def compare_models():
+    models = {
+        "random_forest": RandomForestClassifier(),
+        "gradient_boosting": GradientBoostingClassifier(),
+        "svm": SVC()
+    }
     
-    drift_results = {}
-    for column in reference_data.columns:
-        if column in current_data.columns:
-            statistic, p_value = ks_2samp(
-                reference_data[column].dropna(),
-                current_data[column].dropna()
-            )
-            drift_results[column] = {
-                'p_value': p_value,
-                'drift_detected': p_value < threshold
-            }
+    results = {}
     
-    return drift_results
+    with mlflow.start_run(run_name="model_comparison"):
+        for name, model in models.items():
+            with mlflow.start_run(run_name=name, nested=True):
+                # Train model
+                model.fit(X_train, y_train)
+                
+                # Evaluate
+                train_score = model.score(X_train, y_train)
+                test_score = model.score(X_test, y_test)
+                
+                # Log results
+                mlflow.log_params(model.get_params())
+                mlflow.log_metrics({
+                    "train_accuracy": train_score,
+                    "test_accuracy": test_score
+                })
+                
+                # Log model
+                mlflow.sklearn.log_model(model, "model")
+                
+                results[name] = test_score
+        
+        # Log comparison results
+        best_model = max(results.items(), key=lambda x: x[1])
+        mlflow.log_param("best_model", best_model[0])
+        mlflow.log_metric("best_accuracy", best_model[1])
+    
+    return results
 ```
 
-## 9. Best Practices & Tips
+### Cross-Validation Tracking
 
-### Time Series Specific Considerations
+```python
+from sklearn.model_selection import cross_val_score
 
-- **No Data Leakage**: Ensure future information doesn’t leak into past predictions
-- **Temporal Ordering**: Always respect chronological order in splits
-- **Seasonality**: Consider seasonal decomposition and seasonal features
-- **Stationarity**: Check for trends and seasonality, apply differencing if needed
-- **Cross-validation**: Use TimeSeriesSplit instead of standard k-fold
+def cross_validate_with_mlflow(model, X, y, cv=5):
+    with mlflow.start_run():
+        # Log model parameters
+        mlflow.log_params(model.get_params())
+        
+        # Perform cross-validation
+        scores = cross_val_score(model, X, y, cv=cv, scoring='accuracy')
+        
+        # Log individual fold scores
+        for fold, score in enumerate(scores):
+            mlflow.log_metric(f"fold_{fold}_accuracy", score)
+        
+        # Log summary statistics
+        mlflow.log_metrics({
+            "mean_cv_accuracy": scores.mean(),
+            "std_cv_accuracy": scores.std(),
+            "min_cv_accuracy": scores.min(),
+            "max_cv_accuracy": scores.max()
+        })
+        
+        # Log the model
+        model.fit(X, y)  # Fit on full dataset
+        mlflow.sklearn.log_model(model, "model")
+        
+        return scores
+```
 
-### Random Forest for Time Series
+## CLI Commands Reference
 
-- **Lag Features**: Include multiple lag periods (1, 7, 30 days)
-- **Rolling Statistics**: Moving averages, standard deviations
-- **Temporal Features**: Day of week, month, quarter, holidays
-- **Feature Selection**: Use feature importance to remove irrelevant features
-- **Hyperparameter Tuning**: Focus on n_estimators, max_depth, min_samples_split
+```bash
+# Tracking Server
+mlflow server --help
+mlflow ui  # Start UI on localhost:5000
 
-### Azure ML Optimization
+# Runs
+mlflow runs list --experiment-id 1
+mlflow runs describe --run-id <run_id>
+mlflow runs restore --run-id <run_id>
 
-- **Compute Management**: Use auto-scaling for cost efficiency
-- **Data Versioning**: Version datasets for reproducibility
-- **Environment Management**: Use registered environments for consistency
-- **Model Versioning**: Tag and version models systematically
-- **Monitoring**: Set up data drift and model performance monitoring
+# Experiments
+mlflow experiments list
+mlflow experiments create --experiment-name "New Experiment"
+mlflow experiments delete --experiment-id 1
 
-### Performance Tips
+# Models
+mlflow models serve --help
+mlflow models predict --help
+mlflow models build-docker --help
 
-- **Parallel Processing**: Leverage Azure ML’s parallel capabilities
-- **Feature Store**: Consider Azure ML feature store for reusable features
-- **Automated ML**: Compare with Azure AutoML for time series
-- **Resource Optimization**: Right-size compute based on data volume
-- **Caching**: Use dataset caching for repeated experiments
+# Projects
+mlflow run --help
+mlflow run . -P alpha=0.1
+
+# Registry
+mlflow models list-registered-models
+mlflow models get-model-version --name "ModelName" --version 1
+```
+
+## Troubleshooting Common Issues
+
+### Connection Issues
+
+```python
+# Test connection
+try:
+    mlflow.set_tracking_uri("http://localhost:5000")
+    mlflow.get_experiment_by_name("Default")
+    print("Connection successful")
+except Exception as e:
+    print(f"Connection failed: {e}")
+```
+
+### Storage Issues
+
+```python
+# Check artifact location
+run = mlflow.get_run(run_id)
+print(f"Artifact URI: {run.info.artifact_uri}")
+
+# Download artifacts
+mlflow.artifacts.download_artifacts(
+    run_id=run_id,
+    artifact_path="model",
+    dst_path="./downloads"
+)
+```
+
+### Performance Optimization
+
+```python
+# Batch logging for better performance
+with mlflow.start_run():
+    # Instead of multiple log_metric calls
+    metrics = {}
+    for epoch in range(100):
+        metrics[f"epoch_{epoch}_loss"] = calculate_loss(epoch)
+    
+    mlflow.log_metrics(metrics)  # Single batch call
+```
+
+# MLflow Complete Reference Card
+
+## Overview
+
+MLflow is an open-source platform for managing the ML lifecycle, including experimentation, reproducibility, deployment, and a central model registry.
+
+## Installation Guide
+
+### Basic Installation
+
+#### pip (recommended)
+
+```bash
+# Latest stable version
+pip install mlflow
+
+# With extra dependencies
+pip install mlflow[extras]
+
+# Specific version
+pip install mlflow==2.8.1
+
+# Development version
+pip install git+https://github.com/mlflow/mlflow.git
+```
+
+#### conda
+
+```bash
+# From conda-forge
+conda install -c conda-forge mlflow
+
+# With additional packages
+conda install -c conda-forge mlflow boto3 psycopg2
+```
+
+#### Docker
+
+```bash
+# Official MLflow image
+docker pull ghcr.io/mlflow/mlflow
+
+# Run MLflow server in container
+docker run -p 5000:5000 ghcr.io/mlflow/mlflow mlflow server --host 0.0.0.0
+```
+
+### Platform-Specific Installation
+
+#### Windows
+
+```powershell
+# Using pip
+pip install mlflow
+
+# Using conda (recommended for Windows)
+conda install -c conda-forge mlflow
+
+# Add to PATH if needed
+$env:PATH += ";C:\Users\YourUser\AppData\Local\Programs\Python\Python39\Scripts"
+```
+
+#### macOS
+
+```bash
+# Using Homebrew (if available)
+brew install mlflow
+
+# Using pip
+pip3 install mlflow
+
+# Using conda
+conda install -c conda-forge mlflow
+
+# For M1/M2 Macs, ensure compatibility
+pip install --upgrade pip
+pip install mlflow
+```
+
+#### Linux (Ubuntu/Debian)
+
+```bash
+# Install dependencies
+sudo apt-get update
+sudo apt-get install python3-pip python3-dev
+
+# Install MLflow
+pip3 install mlflow
+
+# For system-wide installation
+sudo pip3 install mlflow
+```
+
+#### CentOS/RHEL/Fedora
+
+```bash
+# Install dependencies
+sudo yum install python3-pip python3-devel  # CentOS/RHEL
+sudo dnf install python3-pip python3-devel  # Fedora
+
+# Install MLflow
+pip3 install mlflow
+```
+
+### Database Dependencies
+
+```bash
+# PostgreSQL
+pip install psycopg2-binary
+
+# MySQL
+pip install PyMySQL
+
+# SQL Server
+pip install pyodbc
+
+# All database backends
+pip install mlflow[extras]
+```
+
+### Cloud Storage Dependencies
+
+```bash
+# AWS S3
+pip install boto3
+
+# Azure Blob Storage
+pip install azure-storage-blob
+
+# Google Cloud Storage
+pip install google-cloud-storage
+
+# All cloud backends
+pip install mlflow[extras]
+```
+
+## Platform Configuration and Setup
+
+### Windows Configuration
+
+#### Environment Setup
+
+```powershell
+# PowerShell
+$env:MLFLOW_TRACKING_URI = "http://localhost:5000"
+$env:MLFLOW_DEFAULT_ARTIFACT_ROOT = "file:///C:/mlflow/artifacts"
+
+# Command Prompt
+set MLFLOW_TRACKING_URI=http://localhost:5000
+set MLFLOW_DEFAULT_ARTIFACT_ROOT=file:///C:/mlflow/artifacts
+
+# Permanent environment variables
+[Environment]::SetEnvironmentVariable("MLFLOW_TRACKING_URI", "http://localhost:5000", "User")
+```
+
+#### Windows Service Setup
+
+```powershell
+# Create batch file: mlflow_server.bat
+@echo off
+cd /d "C:\path\to\your\project"
+mlflow server --backend-store-uri sqlite:///mlflow.db --default-artifact-root ./mlruns --host 0.0.0.0 --port 5000
+
+# Install as Windows service using NSSM
+nssm install MLflowService "C:\path\to\mlflow_server.bat"
+nssm start MLflowService
+```
+
+#### Windows Dockerfile
+
+```dockerfile
+FROM python:3.9-windowsservercore-1809
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+EXPOSE 5000
+CMD ["mlflow", "server", "--host", "0.0.0.0", "--port", "5000"]
+```
+
+### macOS Configuration
+
+#### Environment Setup
+
+```bash
+# Bash/Zsh
+echo 'export MLFLOW_TRACKING_URI=http://localhost:5000' >> ~/.zshrc
+echo 'export MLFLOW_DEFAULT_ARTIFACT_ROOT=~/mlflow/artifacts' >> ~/.zshrc
+source ~/.zshrc
+
+# Fish shell
+echo 'set -x MLFLOW_TRACKING_URI http://localhost:5000' >> ~/.config/fish/config.fish
+```
+
+#### macOS Service Setup (launchd)
+
+```xml
+<!-- ~/Library/LaunchAgents/com.mlflow.server.plist -->
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.mlflow.server</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/mlflow</string>
+        <string>server</string>
+        <string>--host</string>
+        <string>0.0.0.0</string>
+        <string>--port</string>
+        <string>5000</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+</dict>
+</plist>
+```
+
+```bash
+# Load the service
+launchctl load ~/Library/LaunchAgents/com.mlflow.server.plist
+launchctl start com.mlflow.server
+```
+
+### Linux Configuration
+
+#### Environment Setup
+
+```bash
+# Add to ~/.bashrc, ~/.zshrc, or ~/.profile
+export MLFLOW_TRACKING_URI=http://localhost:5000
+export MLFLOW_DEFAULT_ARTIFACT_ROOT=/home/$USER/mlflow/artifacts
+
+# Create artifacts directory
+mkdir -p ~/mlflow/artifacts
+
+# Reload configuration
+source ~/.bashrc
+```
+
+#### SystemD Service Setup
+
+```ini
+# /etc/systemd/system/mlflow.service
+[Unit]
+Description=MLflow Tracking Server
+After=network.target
+
+[Service]
+Type=simple
+User=mlflow
+Group=mlflow
+WorkingDirectory=/opt/mlflow
+Environment=PYTHONPATH=/opt/mlflow
+ExecStart=/usr/local/bin/mlflow server \
+    --backend-store-uri sqlite:///opt/mlflow/mlflow.db \
+    --default-artifact-root /opt/mlflow/artifacts \
+    --host 0.0.0.0 \
+    --port 5000
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+# Setup service
+sudo useradd -r -s /bin/false mlflow
+sudo mkdir -p /opt/mlflow/artifacts
+sudo chown -R mlflow:mlflow /opt/mlflow
+
+# Enable and start service
+sudo systemctl daemon-reload
+sudo systemctl enable mlflow
+sudo systemctl start mlflow
+sudo systemctl status mlflow
+```
+
+#### Ubuntu/Debian Package Installation
+
+```bash
+# Create DEB package (optional)
+sudo apt-get install build-essential devscripts debhelper
+# ... package creation steps ...
+
+# Direct installation from source
+git clone https://github.com/mlflow/mlflow.git
+cd mlflow
+pip install -e .
+```
+
+## Docker Deployment Configurations
+
+### Basic Docker Setup
+
+```dockerfile
+# Dockerfile
+FROM python:3.9-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install MLflow
+RUN pip install mlflow psycopg2-binary boto3
+
+# Create non-root user
+RUN useradd -m -u 1000 mlflow
+USER mlflow
+WORKDIR /home/mlflow
+
+# Expose port
+EXPOSE 5000
+
+# Start server
+CMD ["mlflow", "server", "--host", "0.0.0.0", "--port", "5000"]
+```
+
+### Docker Compose Setup
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_DB: mlflow
+      POSTGRES_USER: mlflow
+      POSTGRES_PASSWORD: mlflow
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  minio:
+    image: minio/minio
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    command: server /data --console-address ":9001"
+
+  mlflow:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      MLFLOW_BACKEND_STORE_URI: postgresql://mlflow:mlflow@postgres:5432/mlflow
+      MLFLOW_DEFAULT_ARTIFACT_ROOT: s3://mlflow/artifacts
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+    depends_on:
+      - postgres
+      - minio
+    command: >
+      mlflow server
+      --backend-store-uri postgresql://mlflow:mlflow@postgres:5432/mlflow
+      --default-artifact-root s3://mlflow/artifacts
+      --host 0.0.0.0
+      --port 5000
+
+volumes:
+  postgres_data:
+  minio_data:
+```
+
+### Kubernetes Deployment
+
+```yaml
+# mlflow-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mlflow-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mlflow-server
+  template:
+    metadata:
+      labels:
+        app: mlflow-server
+    spec:
+      containers:
+      - name: mlflow-server
+        image: mlflow/mlflow:latest
+        ports:
+        - containerPort: 5000
+        env:
+        - name: MLFLOW_BACKEND_STORE_URI
+          value: "postgresql://user:pass@postgres:5432/mlflow"
+        - name: MLFLOW_DEFAULT_ARTIFACT_ROOT
+          value: "s3://mlflow-artifacts"
+        command: ["mlflow", "server", "--host", "0.0.0.0", "--port", "5000"]
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mlflow-service
+spec:
+  selector:
+    app: mlflow-server
+  ports:
+  - port: 5000
+    targetPort: 5000
+  type: LoadBalancer
+```
+
+## Cloud Platform Configurations
+
+### AWS Setup
+
+```bash
+# Install AWS CLI
+pip install awscli
+
+# Configure AWS credentials
+aws configure
+
+# Environment variables
+export AWS_ACCESS_KEY_ID=your_access_key
+export AWS_SECRET_ACCESS_KEY=your_secret_key
+export AWS_DEFAULT_REGION=us-west-2
+
+# MLflow with S3 backend
+mlflow server \
+    --backend-store-uri postgresql://user:pass@rds-endpoint:5432/mlflow \
+    --default-artifact-root s3://your-mlflow-bucket/artifacts \
+    --host 0.0.0.0
+```
+
+#### AWS ECS Task Definition
+
+```json
+{
+  "family": "mlflow-server",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::account:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::account:role/mlflowTaskRole",
+  "containerDefinitions": [
+    {
+      "name": "mlflow-server",
+      "image": "mlflow/mlflow:latest",
+      "portMappings": [
+        {
+          "containerPort": 5000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "MLFLOW_BACKEND_STORE_URI",
+          "value": "postgresql://user:pass@rds-endpoint:5432/mlflow"
+        },
+        {
+          "name": "MLFLOW_DEFAULT_ARTIFACT_ROOT",
+          "value": "s3://your-bucket/artifacts"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/mlflow-server",
+          "awslogs-region": "us-west-2",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ]
+}
+```
+
+### Azure Setup
+
+```bash
+# Install Azure CLI
+pip install azure-cli
+
+# Login to Azure
+az login
+
+# Environment variables
+export AZURE_STORAGE_CONNECTION_STRING="your_connection_string"
+export AZURE_STORAGE_ACCOUNT="your_account"
+export AZURE_STORAGE_ACCESS_KEY="your_key"
+
+# MLflow with Azure backend
+mlflow server \
+    --backend-store-uri postgresql://user:pass@server:5432/mlflow \
+    --default-artifact-root azure://container/path \
+    --host 0.0.0.0
+```
+
+### Google Cloud Setup
+
+```bash
+# Install Google Cloud SDK
+pip install google-cloud-storage
+
+# Authenticate
+gcloud auth application-default login
+
+# Environment variables
+export GOOGLE_APPLICATION_CREDENTIALS="path/to/service-account.json"
+
+# MLflow with GCS backend
+mlflow server \
+    --backend-store-uri postgresql://user:pass@cloud-sql-proxy:5432/mlflow \
+    --default-artifact-root gs://your-bucket/artifacts \
+    --host 0.0.0.0
+```
+
+## Development Environment Setup
+
+### Virtual Environment Setup
+
+```bash
+# Python venv
+python -m venv mlflow-env
+source mlflow-env/bin/activate  # Linux/macOS
+mlflow-env\Scripts\activate     # Windows
+
+# Install in virtual environment
+pip install mlflow jupyter notebook
+
+# Conda environment
+conda create -n mlflow python=3.9
+conda activate mlflow
+conda install -c conda-forge mlflow
+
+# Poetry
+poetry init
+poetry add mlflow
+poetry shell
+```
+
+### Jupyter Integration
+
+```python
+# Jupyter notebook setup
+%load_ext autoreload
+%autoreload 2
+
+import mlflow
+mlflow.set_tracking_uri("http://localhost:5000")
+mlflow.set_experiment("jupyter_experiments")
+
+# Start MLflow run in notebook
+mlflow.start_run()
+# ... your ML code ...
+mlflow.end_run()
+```
+
+### IDE Configuration
+
+#### VS Code
+
+```json
+// .vscode/settings.json
+{
+    "python.defaultInterpreterPath": "./mlflow-env/bin/python",
+    "python.envFile": "${workspaceFolder}/.env",
+    "python.terminal.activateEnvironment": true
+}
+```
+
+#### PyCharm
+
+```python
+# Add to run configuration environment variables
+MLFLOW_TRACKING_URI=http://localhost:5000
+PYTHONPATH=${PYTHONPATH}:${PROJECT_DIR}
+```
+
+### Configuration Files
+
+```python
+# config.py
+import os
+from pathlib import Path
+
+class MLflowConfig:
+    TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
+    EXPERIMENT_NAME = os.getenv("MLFLOW_EXPERIMENT_NAME", "default")
+    ARTIFACT_ROOT = os.getenv("MLFLOW_ARTIFACT_ROOT", str(Path.home() / "mlflow" / "artifacts"))
+    
+    # Database configuration
+    DATABASE_URI = os.getenv("MLFLOW_DATABASE_URI", "sqlite:///mlflow.db")
+    
+    # S3 configuration
+    S3_ENDPOINT_URL = os.getenv("MLFLOW_S3_ENDPOINT_URL")
+    AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+    AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+```
+
+```yaml
+# .env file
+MLFLOW_TRACKING_URI=http://localhost:5000
+MLFLOW_EXPERIMENT_NAME=my_experiment
+MLFLOW_ARTIFACT_ROOT=./artifacts
+AWS_ACCESS_KEY_ID=your_access_key
+AWS_SECRET_ACCESS_KEY=your_secret_key
+```
+
+This expanded section provides comprehensive installation and configuration instructions for all major platforms and deployment scenarios.
+
+## Core Components
+
+### 1. MLflow Tracking
+
+Track experiments, parameters, metrics, and artifacts.
+
+#### Basic Tracking Setup
+
+```python
+import mlflow
+import mlflow.sklearn
+from mlflow import log_metric, log_param, log_artifacts
+
+# Set tracking URI (optional)
+mlflow.set_tracking_uri("http://localhost:5000")
+
+# Set experiment
+mlflow.set_experiment("my_experiment")
+```
+
+#### Run Context Management
+
+```python
+# Method 1: Context manager (recommended)
+with mlflow.start_run():
+    mlflow.log_param("alpha", 0.1)
+    mlflow.log_metric("rmse", 0.786)
+    
+# Method 2: Manual start/end
+run = mlflow.start_run()
+mlflow.log_param("alpha", 0.1)
+mlflow.end_run()
+
+# Method 3: Active run
+mlflow.start_run()
+# ... logging code ...
+mlflow.end_run()
+```
+
+#### Logging Functions
+
+```python
+# Parameters (hyperparameters, configs)
+mlflow.log_param("learning_rate", 0.01)
+mlflow.log_params({"batch_size": 32, "epochs": 100})
+
+# Metrics (model performance)
+mlflow.log_metric("accuracy", 0.95)
+mlflow.log_metrics({"precision": 0.92, "recall": 0.88})
+
+# Step-wise metrics (for tracking over epochs)
+for epoch in range(100):
+    mlflow.log_metric("loss", loss_value, step=epoch)
+
+# Artifacts (files, models, plots)
+mlflow.log_artifact("model.pkl")
+mlflow.log_artifacts("output_dir")
+
+# Text
+mlflow.log_text("Some important note", "notes.txt")
+
+# Dictionary as JSON
+mlflow.log_dict({"key": "value"}, "config.json")
+```
+
+#### Tags and Notes
+
+```python
+# Set tags
+mlflow.set_tag("model_type", "random_forest")
+mlflow.set_tags({"version": "1.0", "team": "data_science"})
+
+# Add notes
+mlflow.set_tag("mlflow.note.content", "This is a baseline model")
+```
+
+### 2. MLflow Models
+
+Standardized model packaging and deployment.
+
+#### Model Flavors
+
+```python
+# Scikit-learn
+import mlflow.sklearn
+mlflow.sklearn.log_model(model, "model")
+loaded_model = mlflow.sklearn.load_model("runs:/{}/model".format(run_id))
+
+# PyTorch
+import mlflow.pytorch
+mlflow.pytorch.log_model(model, "model")
+
+# TensorFlow/Keras
+import mlflow.tensorflow
+import mlflow.keras
+mlflow.keras.log_model(model, "model")
+
+# XGBoost
+import mlflow.xgboost
+mlflow.xgboost.log_model(model, "model")
+
+# LightGBM
+import mlflow.lightgbm
+mlflow.lightgbm.log_model(model, "model")
+
+# Statsmodels
+import mlflow.statsmodels
+mlflow.statsmodels.log_model(model, "model")
+
+# Spark ML
+import mlflow.spark
+mlflow.spark.log_model(model, "model")
+
+# Custom Python function
+import mlflow.pyfunc
+mlflow.pyfunc.log_model("model", python_model=custom_model)
+```
+
+#### Custom Model Example
+
+```python
+import mlflow.pyfunc
+
+class ModelWrapper(mlflow.pyfunc.PythonModel):
+    def __init__(self, model):
+        self.model = model
+        
+    def predict(self, context, model_input):
+        return self.model.predict(model_input)
+
+# Log custom model
+with mlflow.start_run():
+    wrapped_model = ModelWrapper(trained_model)
+    mlflow.pyfunc.log_model(
+        "custom_model", 
+        python_model=wrapped_model,
+        registered_model_name="MyCustomModel"
+    )
+```
+
+#### Model Signature
+
+```python
+from mlflow.models.signature import infer_signature
+from mlflow.types.schema import Schema, ColSpec
+
+# Infer signature automatically
+signature = infer_signature(X_train, y_pred)
+
+# Manual signature definition
+input_schema = Schema([
+    ColSpec("double", "feature1"),
+    ColSpec("double", "feature2"),
+    ColSpec("string", "category")
+])
+output_schema = Schema([ColSpec("double")])
+signature = ModelSignature(inputs=input_schema, outputs=output_schema)
+
+# Log with signature
+mlflow.sklearn.log_model(model, "model", signature=signature)
+```
+
+### 3. MLflow Projects
+
+Reproducible ML code packaging.
+
+#### MLproject File
+
+```yaml
+name: My Project
+conda_env: conda.yaml
+
+entry_points:
+  main:
+    parameters:
+      alpha: {type: float, default: 0.1}
+      l1_ratio: {type: float, default: 0.1}
+    command: "python train.py {alpha} {l1_ratio}"
+    
+  validate:
+    parameters:
+      model_uri: string
+    command: "python validate.py {model_uri}"
+```
+
+#### Running Projects
+
+```python
+# Run local project
+mlflow.run(".", parameters={"alpha": 0.5})
+
+# Run from GitHub
+mlflow.run(
+    "https://github.com/user/repo.git",
+    parameters={"alpha": 0.5}
+)
+
+# Run specific entry point
+mlflow.run(".", entry_point="validate", parameters={"model_uri": "runs:/abc/model"})
+```
+
+### 4. MLflow Model Registry
+
+Central model store for lifecycle management.
+
+#### Registering Models
+
+```python
+# Register during logging
+mlflow.sklearn.log_model(
+    model, 
+    "model",
+    registered_model_name="ProductionModel"
+)
+
+# Register existing run
+model_uri = "runs:/{}/model".format(run_id)
+mlflow.register_model(model_uri, "ProductionModel")
+
+# Register with version description
+result = mlflow.register_model(
+    model_uri,
+    "ProductionModel",
+    description="Model trained on latest dataset"
+)
+```
+
+#### Model Versions and Stages
+
+```python
+from mlflow.tracking import MlflowClient
+
+client = MlflowClient()
+
+# List registered models
+models = client.list_registered_models()
+
+# Get model versions
+versions = client.get_registered_model("ProductionModel").latest_versions
+
+# Transition model stage
+client.transition_model_version_stage(
+    name="ProductionModel",
+    version=1,
+    stage="Production",
+    archive_existing_versions=True
+)
+
+# Update model version
+client.update_model_version(
+    name="ProductionModel",
+    version=1,
+    description="Updated description"
+)
+
+# Delete model version
+client.delete_model_version("ProductionModel", version=1)
+```
+
+#### Loading Models from Registry
+
+```python
+# Load latest version
+model = mlflow.pyfunc.load_model("models:/ProductionModel/latest")
+
+# Load specific version
+model = mlflow.pyfunc.load_model("models:/ProductionModel/1")
+
+# Load by stage
+model = mlflow.pyfunc.load_model("models:/ProductionModel/Production")
+```
+
+## Advanced Features
+
+### Autologging
+
+```python
+# Enable autologging for specific libraries
+mlflow.sklearn.autolog()
+mlflow.keras.autolog()
+mlflow.pytorch.autolog()
+mlflow.xgboost.autolog()
+
+# Enable for all supported libraries
+mlflow.autolog()
+
+# Disable autologging
+mlflow.sklearn.autolog(disable=True)
+
+# Configure autologging
+mlflow.sklearn.autolog(
+    log_input_examples=True,
+    log_model_signatures=True,
+    log_models=False  # Don't log models automatically
+)
+```
+
+### Parent and Child Runs
+
+```python
+# Parent run
+with mlflow.start_run() as parent_run:
+    mlflow.log_param("experiment_type", "hyperparameter_tuning")
+    
+    # Child runs for different configurations
+    for alpha in [0.1, 0.5, 1.0]:
+        with mlflow.start_run(nested=True) as child_run:
+            mlflow.log_param("alpha", alpha)
+            # Train and log model...
+```
+
+### Search and Query Runs
+
+```python
+from mlflow.tracking import MlflowClient
+
+client = MlflowClient()
+
+# Search runs
+runs = mlflow.search_runs(
+    experiment_ids=["1"],
+    filter_string="metrics.accuracy > 0.9",
+    order_by=["metrics.accuracy DESC"],
+    max_results=10
+)
+
+# Get run data
+run = client.get_run(run_id)
+print(f"Status: {run.info.status}")
+print(f"Start time: {run.info.start_time}")
+print(f"Parameters: {run.data.params}")
+print(f"Metrics: {run.data.metrics}")
+
+# Get metric history
+history = client.get_metric_history(run_id, "loss")
+```
+
+### Experiment Management
+
+```python
+# Create experiment
+experiment_id = mlflow.create_experiment(
+    "New Experiment",
+    artifact_location="s3://bucket/artifacts",
+    tags={"team": "ml", "project": "recommendation"}
+)
+
+# Get experiment
+experiment = mlflow.get_experiment(experiment_id)
+
+# List experiments
+experiments = mlflow.list_experiments()
+
+# Set experiment by name
+mlflow.set_experiment("My Experiment")
+
+# Delete experiment
+mlflow.delete_experiment(experiment_id)
+```
+
+## Deployment Options
+
+### Local Model Serving
+
+```bash
+# Serve model locally
+mlflow models serve -m models:/ProductionModel/1 -p 5001
+
+# Serve with conda environment
+mlflow models serve -m models:/ProductionModel/1 --env-manager conda
+
+# Build Docker image
+mlflow models build-docker -m models:/ProductionModel/1 -n my-model
+
+# Generate Dockerfile
+mlflow models generate-dockerfile -m models:/ProductionModel/1 -d ./dockerfile_dir
+```
+
+### Cloud Deployments
+
+```python
+# Deploy to AWS SageMaker
+mlflow.deployments.deploy(
+    "sagemaker",
+    model_uri="models:/ProductionModel/1",
+    config={
+        "instance_type": "ml.m5.large",
+        "instance_count": 1,
+        "region_name": "us-west-2"
+    }
+)
+
+# Deploy to Azure ML
+mlflow.deployments.deploy(
+    "azureml",
+    model_uri="models:/ProductionModel/1",
+    config={
+        "compute_type": "ACI",
+        "location": "eastus2"
+    }
+)
+```
+
+### Batch Inference
+
+```python
+# Apply model to Spark DataFrame
+predictions = mlflow.pyfunc.spark_udf(
+    spark, 
+    model_uri="models:/ProductionModel/1"
+)
+
+df_with_predictions = df.withColumn("predictions", predictions(*feature_cols))
+```
+
+## Configuration and Setup
+
+### Tracking Server Setup
+
+```bash
+# Start local tracking server
+mlflow server \
+    --backend-store-uri sqlite:///mlflow.db \
+    --default-artifact-root ./mlruns \
+    --host 0.0.0.0 \
+    --port 5000
+
+# With remote artifact store
+mlflow server \
+    --backend-store-uri postgresql://user:pass@host:port/db \
+    --default-artifact-root s3://bucket/artifacts \
+    --host 0.0.0.0
+```
+
+### Environment Variables
+
+```bash
+export MLFLOW_TRACKING_URI=http://localhost:5000
+export MLFLOW_S3_ENDPOINT_URL=http://minio:9000
+export AWS_ACCESS_KEY_ID=minioadmin
+export AWS_SECRET_ACCESS_KEY=minioadmin
+export MLFLOW_EXPERIMENT_NAME=default
+```
+
+### Configuration File
+
+```python
+# mlflow_config.py
+import mlflow
+import os
+
+def setup_mlflow():
+    mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000"))
+    mlflow.set_experiment(os.getenv("MLFLOW_EXPERIMENT_NAME", "default"))
+    
+    # Configure autologging
+    mlflow.autolog()
+```
+
+## Best Practices and Patterns
+
+### Experiment Organization
+
+```python
+# Use descriptive experiment names
+mlflow.set_experiment(f"recommendation_model_{datetime.now().strftime('%Y%m%d')}")
+
+# Use consistent tagging strategy
+tags = {
+    "model_type": "collaborative_filtering",
+    "data_version": "v2.1",
+    "feature_set": "user_item_interactions",
+    "environment": "production"
+}
+mlflow.set_tags(tags)
+
+# Log important context
+mlflow.log_param("git_commit", get_git_commit())
+mlflow.log_param("dataset_size", len(train_data))
+mlflow.log_param("feature_count", X_train.shape[1])
+```
+
+### Model Validation Pattern
+
+```python
+def train_and_validate_model(params):
+    with mlflow.start_run():
+        # Log hyperparameters
+        mlflow.log_params(params)
+        
+        # Train model
+        model = train_model(params)
+        
+        # Validate
+        train_score = evaluate_model(model, X_train, y_train)
+        val_score = evaluate_model(model, X_val, y_val)
+        
+        # Log metrics
+        mlflow.log_metrics({
+            "train_accuracy": train_score,
+            "val_accuracy": val_score,
+            "overfitting": train_score - val_score
+        })
+        
+        # Log model if performance is good
+        if val_score > 0.8:
+            mlflow.sklearn.log_model(
+                model, 
+                "model",
+                registered_model_name="BestModel" if val_score > 0.9 else None
+            )
+        
+        return model, val_score
+```
+
+### Pipeline Integration
+
+```python
+class MLflowPipeline:
+    def __init__(self, experiment_name):
+        mlflow.set_experiment(experiment_name)
+        
+    def run_experiment(self, config):
+        with mlflow.start_run() as run:
+            # Data preparation
+            X_train, X_val, y_train, y_val = self.prepare_data(config)
+            mlflow.log_params(config["data"])
+            
+            # Feature engineering
+            features = self.engineer_features(X_train, config["features"])
+            mlflow.log_param("feature_count", len(features))
+            
+            # Model training
+            model = self.train_model(X_train, y_train, config["model"])
+            mlflow.log_params(config["model"])
+            
+            # Evaluation
+            metrics = self.evaluate_model(model, X_val, y_val)
+            mlflow.log_metrics(metrics)
+            
+            # Model logging
+            mlflow.sklearn.log_model(model, "model")
+            
+            return run.info.run_id
+```
+
+### Error Handling and Cleanup
+
+```python
+def safe_mlflow_run(training_function, **kwargs):
+    run_id = None
+    try:
+        with mlflow.start_run() as run:
+            run_id = run.info.run_id
+            result = training_function(**kwargs)
+            mlflow.log_metrics({"success": 1})
+            return result
+            
+    except Exception as e:
+        if run_id:
+            # Log error information
+            mlflow.log_param("error_message", str(e))
+            mlflow.log_metrics({"success": 0})
+        
+        # End run gracefully
+        if mlflow.active_run():
+            mlflow.end_run(status="FAILED")
+        raise
+```
+
+## Common Use Cases and Examples
+
+### Hyperparameter Tuning with Optuna
+
+```python
+import optuna
+from optuna.integration.mlflow import MLflowCallback
+
+def objective(trial):
+    # Suggest hyperparameters
+    params = {
+        'n_estimators': trial.suggest_int('n_estimators', 50, 300),
+        'max_depth': trial.suggest_int('max_depth', 3, 10),
+        'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3)
+    }
+    
+    with mlflow.start_run(nested=True):
+        mlflow.log_params(params)
+        
+        # Train and evaluate
+        model = RandomForestClassifier(**params)
+        model.fit(X_train, y_train)
+        
+        score = model.score(X_val, y_val)
+        mlflow.log_metric('accuracy', score)
+        
+        return score
+
+# Run optimization
+study = optuna.create_study(direction='maximize')
+mlflc = MLflowCallback(tracking_uri="http://localhost:5000", metric_name="accuracy")
+
+with mlflow.start_run():
+    study.optimize(objective, n_trials=100, callbacks=[mlflc])
+    
+    # Log best parameters
+    mlflow.log_params(study.best_params)
+    mlflow.log_metric('best_accuracy', study.best_value)
+```
+
+### A/B Testing Model Comparison
+
+```python
+def compare_models():
+    models = {
+        "random_forest": RandomForestClassifier(),
+        "gradient_boosting": GradientBoostingClassifier(),
+        "svm": SVC()
+    }
+    
+    results = {}
+    
+    with mlflow.start_run(run_name="model_comparison"):
+        for name, model in models.items():
+            with mlflow.start_run(run_name=name, nested=True):
+                # Train model
+                model.fit(X_train, y_train)
+                
+                # Evaluate
+                train_score = model.score(X_train, y_train)
+                test_score = model.score(X_test, y_test)
+                
+                # Log results
+                mlflow.log_params(model.get_params())
+                mlflow.log_metrics({
+                    "train_accuracy": train_score,
+                    "test_accuracy": test_score
+                })
+                
+                # Log model
+                mlflow.sklearn.log_model(model, "model")
+                
+                results[name] = test_score
+        
+        # Log comparison results
+        best_model = max(results.items(), key=lambda x: x[1])
+        mlflow.log_param("best_model", best_model[0])
+        mlflow.log_metric("best_accuracy", best_model[1])
+    
+    return results
+```
+
+### Cross-Validation Tracking
+
+```python
+from sklearn.model_selection import cross_val_score
+
+def cross_validate_with_mlflow(model, X, y, cv=5):
+    with mlflow.start_run():
+        # Log model parameters
+        mlflow.log_params(model.get_params())
+        
+        # Perform cross-validation
+        scores = cross_val_score(model, X, y, cv=cv, scoring='accuracy')
+        
+        # Log individual fold scores
+        for fold, score in enumerate(scores):
+            mlflow.log_metric(f"fold_{fold}_accuracy", score)
+        
+        # Log summary statistics
+        mlflow.log_metrics({
+            "mean_cv_accuracy": scores.mean(),
+            "std_cv_accuracy": scores.std(),
+            "min_cv_accuracy": scores.min(),
+            "max_cv_accuracy": scores.max()
+        })
+        
+        # Log the model
+        model.fit(X, y)  # Fit on full dataset
+        mlflow.sklearn.log_model(model, "model")
+        
+        return scores
+```
+
+## CLI Commands Reference
+
+```bash
+# Tracking Server
+mlflow server --help
+mlflow ui  # Start UI on localhost:5000
+
+# Runs
+mlflow runs list --experiment-id 1
+mlflow runs describe --run-id <run_id>
+mlflow runs restore --run-id <run_id>
+
+# Experiments
+mlflow experiments list
+mlflow experiments create --experiment-name "New Experiment"
+mlflow experiments delete --experiment-id 1
+
+# Models
+mlflow models serve --help
+mlflow models predict --help
+mlflow models build-docker --help
+
+# Projects
+mlflow run --help
+mlflow run . -P alpha=0.1
+
+# Registry
+mlflow models list-registered-models
+mlflow models get-model-version --name "ModelName" --version 1
+```
+
+## Troubleshooting Common Issues
+
+### Connection Issues
+
+```python
+# Test connection
+try:
+    mlflow.set_tracking_uri("http://localhost:5000")
+    mlflow.get_experiment_by_name("Default")
+    print("Connection successful")
+except Exception as e:
+    print(f"Connection failed: {e}")
+```
+
+### Storage Issues
+
+```python
+# Check artifact location
+run = mlflow.get_run(run_id)
+print(f"Artifact URI: {run.info.artifact_uri}")
+
+# Download artifacts
+mlflow.artifacts.download_artifacts(
+    run_id=run_id,
+    artifact_path="model",
+    dst_path="./downloads"
+)
+```
+
+### Performance Optimization
+
+```python
+# Batch logging for better performance
+with mlflow.start_run():
+    # Instead of multiple log_metric calls
+    metrics = {}
+    for epoch in range(100):
+        metrics[f"epoch_{epoch}_loss"] = calculate_loss(epoch)
+    
+    mlflow.log_metrics(metrics)  # Single batch call
+```
+
